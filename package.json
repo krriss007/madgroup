@@ -1,0 +1,33 @@
+{
+  "name": "tradepilot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TradePilot — professional web trading terminal for XAU/USD and Forex (demo + MT5 bridge)",
+  "license": "MIT",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend",
+    "tests"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "npm run dev -w @tradepilot/backend",
+    "dev:frontend": "npm run dev -w @tradepilot/frontend",
+    "build": "npm run build -w @tradepilot/backend && npm run build -w @tradepilot/frontend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @tradepilot/tests",
+    "test:unit": "npm run test:unit -w @tradepilot/tests",
+    "test:integration": "npm run test:integration -w @tradepilot/tests",
+    "db:setup": "node scripts/db-setup.mjs",
+    "seed": "node scripts/seed.mjs"
+  },
+  "devDependencies": {
+    "@prisma/client": "^5.22.0",
+    "concurrently": "^9.1.0",
+    "prisma": "^5.22.0"
+  }
+}

@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 20% 96%;
+    --panel: 222 40% 9%;
+    --panel-border: 218 30% 16%;
+    --card: 222 40% 9%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 44% 8%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 218 32% 14%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 218 30% 14%;
+    --muted-foreground: 215 20% 62%;
+    --accent: 218 32% 16%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 218 30% 16%;
+    --input: 218 30% 18%;
+    --ring: 199 89% 48%;
+    --radius: 0.6rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    font-feature-settings: 'tnum' 1;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(218 30% 22%);
+    border-radius: 999px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(218 30% 30%);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-panel-border bg-panel/80;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between border-b border-panel-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground;
+  }
+
+  .num {
+    @apply font-mono tabular-nums;
+  }
+
+  .table-compact {
+    @apply w-full border-collapse text-xs;
+  }
+  .table-compact th {
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-panel-border bg-panel/95 px-2 py-1.5 text-left text-2xs font-semibold uppercase tracking-wide text-muted-foreground;
+  }
+  .table-compact td {
+    @apply whitespace-nowrap border-b border-panel-border/60 px-2 py-1.5;
+  }
+  .table-compact tbody tr:hover {
+    @apply bg-accent/40;
+  }
+}

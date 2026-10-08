@@ -1,0 +1,558 @@
+// ===========================================================================
+// TradePilot — Prisma schema (canonical data model, mirrors database/schema.sql)
+// ===========================================================================
+//
+// TradePilot ships two equivalent definitions of the same data model:
+//
+//   • database/schema.sql   — the DDL the backend applies at boot and that you
+//                             run on your PostgreSQL/VPS: `npm run db:setup`.
+//   • prisma/schema.prisma  — this file, used for Prisma tooling (Studio,
+//                             `prisma migrate diff`, `prisma db pull`,
+//                             generated types for scripts).
+//
+// The two are kept in sync by naming columns with @map so that Prisma's
+// generated SQL matches database/schema.sql column-for-column.
+//
+// Usage
+// -----
+//   npx prisma validate                       # schema is valid
+//   npx prisma migrate diff \
+//     --from-empty --to-schema-datamodel prisma/schema.prisma --script
+//   npx prisma studio                         # inspect the live database
+//
+// Deliberate choices
+// ------------------
+//   • Enum-like columns are plain strings with a comment instead of Prisma
+//     enums, so that `prisma db push` cannot create a Postgres-enum type that
+//     disagrees with the CHECK constraints in database/schema.sql. The CHECK
+//     constraints are the authoritative validation.
+//   • Money is Decimal(18, 2), prices Decimal(18, 8), volumes Decimal(18, 4) —
+//     identical precision to the SQL file.
+//   • audit_logs is append-only. Prisma cannot express a rule, so the SQL file
+//     installs `ON UPDATE/DELETE DO INSTEAD NOTHING` rules and the service layer
+//     only ever inserts (see backend/src/services/audit.service.ts).
+//   • No broker password, terminal password or payment credential is modelled
+//     anywhere. mt5_connections stores a token hash plus an encrypted signing
+//     secret, both revocable from Settings → MT5 Connection.
+// ===========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// users
+// ---------------------------------------------------------------------------
+model User {
+  id                    String    @id
+  email                 String    @unique
+  displayName           String    @map("display_name")
+  /// scrypt hash ("scrypt$N$r$p$salt$hash") — never logged, never exposed
+  passwordHash          String    @map("password_hash")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @map("updated_at")
+  /// LIVE trading must be enabled explicitly by the user
+  liveTradingEnabled    Boolean   @default(false) @map("live_trading_enabled")
+  liveTradingEnabledAt  DateTime? @map("live_trading_enabled_at")
+  liveRiskAcknowledgedAt DateTime? @map("live_risk_acknowledged_at")
+  killSwitchEngaged     Boolean   @default(false) @map("kill_switch_engaged")
+  lastLoginAt           DateTime? @map("last_login_at")
+  failedLoginCount      Int       @default(0) @map("failed_login_count")
+  lockedUntil           DateTime? @map("locked_until")
+  /// incremented to invalidate all previously issued JWTs
+  tokenVersion          Int       @default(1) @map("token_version")
+
+  accounts      BrokerAccount[]
+  connections   Mt5Connection[]
+  watchlists    Watchlist[]
+  watchlistItems WatchlistItem[]
+  orders        Order[]
+  positions     Position[]
+  trades        Trade[]
+  alerts        PriceAlert[]
+  riskSettings  RiskSettings?
+  snapshots     PortfolioSnapshot[]
+  journal       JournalEntry[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  bridgeCommands BridgeCommand[]
+  strategies    Strategy[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// broker accounts — one per (user, mode). DEMO is simulated, LIVE mirrors MT5.
+// ---------------------------------------------------------------------------
+model BrokerAccount {
+  id              String   @id
+  userId          String   @map("user_id")
+  /// "DEMO" | "LIVE"
+  mode            String
+  /// MT5 login for live accounts, synthetic id for the demo account
+  login           String
+  server          String
+  currency        String   @default("USD")
+  leverage        Int      @default(100)
+  balance         Decimal  @default(0) @db.Decimal(18, 2)
+  equity          Decimal  @default(0) @db.Decimal(18, 2)
+  margin          Decimal  @default(0) @db.Decimal(18, 2)
+  freeMargin      Decimal  @default(0) @map("free_margin") @db.Decimal(18, 2)
+  marginLevel     Decimal? @map("margin_level") @db.Decimal(18, 2)
+  profit          Decimal  @default(0) @db.Decimal(18, 2)
+  startingBalance Decimal  @default(0) @map("starting_balance") @db.Decimal(18, 2)
+  isAuthorized    Boolean  @default(false) @map("is_authorized")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+  lastUpdate      DateTime @default(now()) @map("last_update")
+
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connections Mt5Connection[]
+  orders     Order[]
+  positions  Position[]
+  trades     Trade[]
+  snapshots  PortfolioSnapshot[]
+  strategies Strategy[]
+
+  @@unique([userId, mode])
+  @@map("broker_accounts")
+}
+
+// ---------------------------------------------------------------------------
+// MT5 bridge device registrations (one row per EA installation)
+// ---------------------------------------------------------------------------
+model Mt5Connection {
+  id                 String    @id
+  userId             String    @map("user_id")
+  accountId          String?   @map("account_id")
+  deviceId           String    @unique @map("device_id")
+  deviceName         String?   @map("device_name")
+  /// SHA-256 of the device secret; the plaintext token is shown once
+  tokenHash          String    @map("token_hash")
+  /// AES-256-GCM ciphertext of the secret, used to sign bridge commands
+  tokenSecretEnc     String?   @map("token_secret_enc")
+  tokenPrefix        String    @map("token_prefix")
+  accountLogin       String?   @map("account_login")
+  server             String?
+  /// "CONNECTED" | "DEGRADED" | "OFFLINE"
+  status             String    @default("OFFLINE")
+  lastHeartbeat      DateTime? @map("last_heartbeat")
+  lastSequence       BigInt    @default(0) @map("last_sequence")
+  latencyMs          Int?      @map("latency_ms")
+  terminalConnected  Boolean   @default(false) @map("terminal_connected")
+  tradeAllowed       Boolean   @default(false) @map("trade_allowed")
+  eaTradeAllowed     Boolean   @default(false) @map("ea_trade_allowed")
+  algoTradingEnabled Boolean   @default(false) @map("algo_trading_enabled")
+  terminalBuild      String?   @map("terminal_build")
+  eaVersion          String?   @map("ea_version")
+  revokedAt          DateTime? @map("revoked_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @map("updated_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account BrokerAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  symbols Symbol[]
+
+  @@map("mt5_connections")
+}
+
+// ---------------------------------------------------------------------------
+// broker symbol specifications, exactly as reported by MT5 (or the demo profile)
+// ---------------------------------------------------------------------------
+model Symbol {
+  id           String   @id
+  userId       String?  @map("user_id")
+  connectionId String?  @map("connection_id")
+  symbol       String
+  canonical    String
+  /// "MT5" | "DEMO_SIMULATED"
+  source       String
+  /// full symbol specification blob reported by the terminal
+  spec         Json
+  updatedAt    DateTime @default(now()) @map("updated_at")
+
+  user       User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connection Mt5Connection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, symbol])
+  @@index([userId, canonical])
+  @@map("symbols")
+}
+
+model Watchlist {
+  id        String   @id
+  userId    String   @map("user_id")
+  name      String
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WatchlistItem[]
+
+  @@map("watchlists")
+}
+
+model WatchlistItem {
+  id          String   @id
+  watchlistId String   @map("watchlist_id")
+  userId      String   @map("user_id")
+  symbol      String
+  canonical   String
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  watchlist Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, canonical])
+  @@map("watchlist_items")
+}
+
+// ---------------------------------------------------------------------------
+// orders (pending orders; filled rows become positions)
+// ---------------------------------------------------------------------------
+model Order {
+  id              String    @id
+  userId          String    @map("user_id")
+  accountId       String    @map("account_id")
+  /// "DEMO" | "LIVE"
+  mode            String
+  ticket          String
+  brokerTicket    String?   @map("broker_ticket")
+  symbol          String
+  canonical       String
+  /// "BUY" | "SELL"
+  side            String
+  /// "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT"
+  type            String
+  volume          Decimal   @db.Decimal(18, 4)
+  price           Decimal   @db.Decimal(18, 8)
+  stopLimitPrice  Decimal?  @map("stop_limit_price") @db.Decimal(18, 8)
+  stopLoss        Decimal?  @map("stop_loss") @db.Decimal(18, 8)
+  takeProfit      Decimal?  @map("take_profit") @db.Decimal(18, 8)
+  expiration      DateTime?
+  /// "PENDING" | "FILLED" | "CANCELLED" | "REJECTED" | "EXPIRED"
+  status          String    @default("PENDING")
+  comment         String?
+  magic           BigInt    @default(0)
+  /// "MANUAL" | "STRATEGY"
+  origin          String    @default("MANUAL")
+  strategyId      String?   @map("strategy_id")
+  /// idempotency key supplied by the client, unique per user
+  clientRequestId String?   @map("client_request_id")
+  commandId       String?   @map("command_id")
+  placedAt        DateTime  @default(now()) @map("placed_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+  closedAt        DateTime? @map("closed_at")
+  /// "MT5" | "DEMO_SIMULATED"
+  source          String
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([mode, ticket])
+  @@index([accountId, status])
+  @@map("orders")
+}
+
+// ---------------------------------------------------------------------------
+// positions — open trades with live P/L
+// ---------------------------------------------------------------------------
+model Position {
+  id            String   @id
+  userId        String   @map("user_id")
+  accountId     String   @map("account_id")
+  mode          String
+  ticket        String
+  brokerTicket  String?  @map("broker_ticket")
+  symbol        String
+  canonical     String
+  side          String
+  volume        Decimal  @db.Decimal(18, 4)
+  openPrice     Decimal  @map("open_price") @db.Decimal(18, 8)
+  currentPrice  Decimal  @map("current_price") @db.Decimal(18, 8)
+  stopLoss      Decimal? @map("stop_loss") @db.Decimal(18, 8)
+  takeProfit    Decimal? @map("take_profit") @db.Decimal(18, 8)
+  swap          Decimal  @default(0) @db.Decimal(18, 2)
+  commission    Decimal  @default(0) @db.Decimal(18, 2)
+  profit        Decimal  @default(0) @db.Decimal(18, 2)
+  profitPercent Decimal  @default(0) @map("profit_percent") @db.Decimal(18, 4)
+  magic         BigInt   @default(0)
+  comment       String?
+  origin        String   @default("MANUAL")
+  strategyId    String?  @map("strategy_id")
+  /// value at risk when the position was opened (P/L % display)
+  riskAmount    Decimal  @default(0) @map("risk_amount") @db.Decimal(18, 2)
+  accountLogin  String   @map("account_login")
+  openTime      DateTime @default(now()) @map("open_time")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+  source        String
+  /// demo-engine bookkeeping (fees applied, partial closes, …)
+  meta          Json?
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([mode, ticket])
+  @@map("positions")
+}
+
+// ---------------------------------------------------------------------------
+// trades — closed positions
+// ---------------------------------------------------------------------------
+model Trade {
+  id              String   @id
+  userId          String   @map("user_id")
+  accountId       String   @map("account_id")
+  mode            String
+  ticket          String
+  dealTicket      String?  @map("deal_ticket")
+  symbol          String
+  canonical       String
+  side            String
+  volume          Decimal  @db.Decimal(18, 4)
+  entryPrice      Decimal  @map("entry_price") @db.Decimal(18, 8)
+  exitPrice       Decimal  @map("exit_price") @db.Decimal(18, 8)
+  stopLoss        Decimal? @map("stop_loss") @db.Decimal(18, 8)
+  takeProfit      Decimal? @map("take_profit") @db.Decimal(18, 8)
+  commission      Decimal  @default(0) @db.Decimal(18, 2)
+  swap            Decimal  @default(0) @db.Decimal(18, 2)
+  grossProfit     Decimal  @default(0) @map("gross_profit") @db.Decimal(18, 2)
+  netProfit       Decimal  @default(0) @map("net_profit") @db.Decimal(18, 2)
+  openTime        DateTime @map("open_time")
+  closeTime       DateTime @map("close_time")
+  durationSeconds Int      @default(0) @map("duration_seconds")
+  magic           BigInt   @default(0)
+  comment         String?
+  origin          String   @default("MANUAL")
+  strategyId      String?  @map("strategy_id")
+  accountLogin    String   @map("account_login")
+  source          String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, closeTime])
+  @@map("trades")
+}
+
+model PriceAlert {
+  id          String    @id
+  userId      String    @map("user_id")
+  symbol      String
+  canonical   String
+  /// "ABOVE" | "BELOW"
+  condition   String
+  price       Decimal   @db.Decimal(18, 8)
+  triggered   Boolean   @default(false)
+  triggeredAt DateTime? @map("triggered_at")
+  note        String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("price_alerts")
+}
+
+// ---------------------------------------------------------------------------
+// risk settings — enforced by the backend before any order is executed
+// ---------------------------------------------------------------------------
+model RiskSettings {
+  id                     String   @id
+  userId                 String   @unique @map("user_id")
+  maxRiskPerTradePercent Decimal  @default(1) @map("max_risk_per_trade_percent") @db.Decimal(6, 3)
+  maxDailyLossPercent    Decimal  @default(3) @map("max_daily_loss_percent") @db.Decimal(6, 3)
+  maxOpenPositions       Int      @default(5) @map("max_open_positions")
+  maxTotalExposureLots   Decimal  @default(5) @map("max_total_exposure_lots") @db.Decimal(18, 4)
+  maxLotSize             Decimal  @default(1) @map("max_lot_size") @db.Decimal(18, 4)
+  maxDailyTrades         Int?     @map("max_daily_trades")
+  maxConsecutiveLosses   Int      @default(0) @map("max_consecutive_losses")
+  requireLiveConfirmation Boolean @default(true) @map("require_live_confirmation")
+  maxSlippagePoints      Int      @default(20) @map("max_slippage_points")
+  tradingHoursEnabled    Boolean  @default(false) @map("trading_hours_enabled")
+  /// [{ start: "07:00", end: "16:00" }] in UTC
+  tradingHours           Json     @default("[]") @map("trading_hours")
+  strategyEngineEnabled  Boolean  @default(false) @map("strategy_engine_enabled")
+  updatedAt              DateTime @default(now()) @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("risk_settings")
+}
+
+model PortfolioSnapshot {
+  id         String   @id
+  userId     String   @map("user_id")
+  accountId  String   @map("account_id")
+  mode       String
+  balance    Decimal  @db.Decimal(18, 2)
+  equity     Decimal  @db.Decimal(18, 2)
+  margin     Decimal  @default(0) @db.Decimal(18, 2)
+  freeMargin Decimal  @default(0) @map("free_margin") @db.Decimal(18, 2)
+  openPl     Decimal  @default(0) @map("open_pl") @db.Decimal(18, 2)
+  time       DateTime @default(now())
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, time])
+  @@map("portfolio_snapshots")
+}
+
+model JournalEntry {
+  id               String   @id
+  userId           String   @map("user_id")
+  tradeId          String?  @map("trade_id")
+  ticket           String?
+  symbol           String?
+  setup            String?
+  reasonForEntry   String?  @map("reason_for_entry")
+  marketConditions String?  @map("market_conditions")
+  emotion          String?
+  mistakes         String?
+  lesson           String?
+  notes            String?
+  tags             String[] @default([])
+  rating           Int?
+  screenshotUrl    String?  @map("screenshot_url")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("trade_journal")
+}
+
+// ---------------------------------------------------------------------------
+// audit_logs — APPEND-ONLY (enforced by rules in database/schema.sql)
+// ---------------------------------------------------------------------------
+model AuditLog {
+  id           String   @id
+  userId       String?  @map("user_id")
+  mode         String
+  sequence     BigInt   @default(autoincrement())
+  action       String
+  symbol       String?
+  volume       Decimal? @db.Decimal(18, 4)
+  price        Decimal? @db.Decimal(18, 8)
+  stopLoss     Decimal? @map("stop_loss") @db.Decimal(18, 8)
+  takeProfit   Decimal? @map("take_profit") @db.Decimal(18, 8)
+  brokerTicket String?  @map("broker_ticket")
+  /// "SUCCESS" | "FAILURE" | "REJECTED" | "PENDING"
+  result       String
+  errorCode    String?  @map("error_code")
+  errorMessage String?  @map("error_message")
+  ip           String?
+  userAgent    String?  @map("user_agent")
+  deviceId     String?  @map("device_id")
+  commandId    String?  @map("command_id")
+  detail       Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String   @id
+  userId    String   @map("user_id")
+  /// "info" | "success" | "warning" | "critical"
+  level     String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  meta      Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// MT5 bridge command queue (signed envelopes + replay-protected ids)
+// ---------------------------------------------------------------------------
+model BridgeCommand {
+  id             String    @id
+  commandId      String    @unique @map("command_id")
+  userId         String    @map("user_id")
+  accountId      String    @map("account_id")
+  deviceId       String    @map("device_id")
+  action         String
+  symbol         String
+  /// signed envelope handed to the EA, verbatim
+  envelope       Json
+  idempotencyKey String    @map("idempotency_key")
+  /// "QUEUED" | "DELIVERED" | "COMPLETED" | "FAILED" | "EXPIRED"
+  status         String    @default("QUEUED")
+  attempts       Int       @default(0)
+  result         Json?
+  errorCode      String?   @map("error_code")
+  errorMessage   String?   @map("error_message")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  deliveredAt    DateTime? @map("delivered_at")
+  completedAt    DateTime? @map("completed_at")
+  expiresAt      DateTime  @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, status])
+  @@map("bridge_commands")
+}
+
+// ---------------------------------------------------------------------------
+// idempotency keys — a retried order request can never execute twice
+// ---------------------------------------------------------------------------
+model IdempotencyKey {
+  id        String   @id
+  userId    String   @map("user_id")
+  scope     String
+  key       String
+  /// response body returned the first time this key was seen
+  response  Json
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scope, key])
+  @@map("idempotency_keys")
+}
+
+// ---------------------------------------------------------------------------
+// optional strategy engine (disabled by default; signals only)
+// ---------------------------------------------------------------------------
+model Strategy {
+  id                  String    @id
+  userId              String    @map("user_id")
+  accountId           String    @map("account_id")
+  name                String
+  /// "ema_cross" | "rsi_reversion" | "bollinger_breakout"
+  engine              String
+  symbol              String
+  canonical           String
+  timeframe           String
+  enabled             Boolean   @default(false)
+  parameters          Json      @default("{}")
+  riskPerTradePercent Decimal   @default(1) @map("risk_per_trade_percent") @db.Decimal(6, 3)
+  maxPositions        Int       @default(1) @map("max_positions")
+  lastSignalAt        DateTime? @map("last_signal_at")
+  lastError           String?   @map("last_error")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @default(now()) @map("updated_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("strategies")
+}
