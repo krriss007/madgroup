@@ -1,0 +1,22 @@
+{
+  "//": "Runner config for the manual scripts in this folder: the frontend uses Next's JSX transform (@/… path alias, automatic runtime), so these checks are run with `npx tsx --tsconfig tests/manual/tsconfig.json <file>`.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@/*": ["frontend/*"],
+      "@tradepilot/shared": ["shared/src/index.ts"]
+    }
+  },
+  "include": ["./**/*.ts", "./**/*.tsx", "../../frontend/**/*.ts", "../../frontend/**/*.tsx", "../../shared/src/**/*.ts"]
+}

@@ -1,0 +1,19 @@
+# Keep the build context small and reproducible — the image installs its own
+# dependencies from the lockfile, so host artifacts must never leak in.
+node_modules
+**/node_modules
+.next
+**/.next
+out
+dist
+build
+coverage
+.git
+.github
+*.log
+.env
+.env.*
+deploy/.env
+.DS_Store
+.vscode
+.idea
