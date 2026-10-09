@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatMoney, formatNumber, relativeTime } from "@tradepilot/shared";
 import { useTerminal } from "@/lib/terminal-context";
+import { InstallAppButton } from "@/components/pwa/install-app-button";
 import { cn } from "@/lib/utils";
 
 export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void }): JSX.Element {
@@ -125,6 +126,8 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void }): J
           {realtimeConnected ? <Radio className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
           {realtimeConnected ? "stream" : "offline"}
         </span>
+
+        <InstallAppButton />
 
         <DropdownMenu open={notificationsOpen} onOpenChange={setNotificationsOpen}>
           <DropdownMenuTrigger asChild>
