@@ -1,0 +1,43 @@
+# TradePilot — Render blueprint: the fastest route to a public HTTPS URL.
+#
+#   Render dashboard → New + → Blueprint → pick this repo → Apply
+#
+# Render builds deploy/Dockerfile and gives the service a URL of the form
+# https://tradepilot-xxxx.onrender.com. WebSockets work on that URL, so the
+# realtime quote feed runs as-is.
+#
+# Notes:
+#   * The free tier sleeps after inactivity; the first request after a pause
+#     takes ~50s while the container wakes.
+#   * No DATABASE_URL is set here, so the app runs on its in-memory store and
+#     data resets on every deploy/restart. Add a Render PostgreSQL instance and
+#     set DATABASE_URL for persistence.
+#   * LIVE trading stays disabled until you enable it in the UI and connect your
+#     own MT5 terminal. This blueprint exposes nothing that can reach a broker.
+
+services:
+  - type: web
+    name: tradepilot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/system/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BRIDGE_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: 'true'
+      # First-party deployment on its own domain: the browser sends cookies
+      # normally, so the permissive cross-site policy is not needed.
+      - key: COOKIE_SAME_SITE
+        value: lax
+      - key: USE_IN_MEMORY_DB
+        value: 'true'
+      # Visitors land straight in the shared DEMO account. DEMO only.
+      - key: DEMO_AUTO_LOGIN
+        value: 'true'

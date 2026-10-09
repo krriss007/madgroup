@@ -1,0 +1,26 @@
+# TradePilot — reverse proxy with automatic HTTPS.
+#
+# Caddy issues and renews a Let's Encrypt certificate for $DOMAIN by itself.
+# WebSocket upgrades (/ws) need no special handling: reverse_proxy forwards the
+# Upgrade/Connection headers, so the realtime feed works over the same port.
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	reverse_proxy app:3000 {
+		# The terminal proxies /api and /ws itself; this just terminates TLS and
+		# passes everything through, including long-lived WebSocket connections.
+		flush_interval -1
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output stdout
+	}
+}
