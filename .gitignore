@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Runtime state (simulated portfolio snapshots) - never commit
+data/
+
+# Secrets - never commit
+.env
+.env.local
+*.pem
+
+# Logs
+*.log
+logs/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Candlebench — Paper-Trading Sandbox</title>
+  <meta name="description" content="Educational market-analysis dashboard with a simulated (paper) trading bot. No real-money trading. Not financial advice." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='14' y='6' width='4' height='20' rx='1' fill='%232dd4bf'/%3E%3Crect x='10' y='12' width='12' height='8' rx='1' fill='%230ea5e9'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============================ Top bar ============================ -->
+  <header class="topbar">
+    <div class="brand" aria-label="Candlebench">
+      <svg class="brand-mark" width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="6"  y="9"  width="5" height="14" rx="1" fill="#2dd4bf"/>
+        <rect x="7.5" y="5" width="2" height="22" rx="1" fill="#2dd4bf" opacity=".55"/>
+        <rect x="15" y="12" width="5" height="9"  rx="1" fill="#0ea5e9"/>
+        <rect x="16.5" y="7" width="2" height="18" rx="1" fill="#0ea5e9" opacity=".55"/>
+        <rect x="24" y="10" width="0" height="0"/>
+        <path d="M25 8v16M23.5 12h3v8h-3z" stroke="#f59e0b" stroke-width="1.6" fill="none"/>
+      </svg>
+      <span class="brand-name">Candlebench</span>
+      <span class="brand-sub">market analysis · simulated automated trading</span>
+    </div>
+
+    <div class="topbar-badges">
+      <span class="badge badge-paper" id="paperBadge" title="This application never places real-money orders. All balances and fills are simulated.">
+        <span class="dot dot-pulse" aria-hidden="true"></span> PAPER TRADING
+      </span>
+      <span class="badge" id="dataBadge" data-mode="sample" title="Source of the candles you see">DATA: …</span>
+      <span class="badge bot-pill" id="botPill" data-status="IDLE">BOT: IDLE</span>
+    </div>
+  </header>
+
+  <!-- ========================= Risk notice =========================== -->
+  <div class="risk-banner" role="note">
+    <strong>Simulated environment.</strong>
+    Balances, orders, fills and results on this page are <strong>hypothetical</strong> and generated for
+    education only. Signals are informational, simulated results do <strong>not</strong> predict future
+    returns, and nothing here is <strong>financial advice</strong>. No real-money orders can be placed.
+  </div>
+
+  <main class="layout" id="main">
+    <!-- ======================= Sidebar: markets ======================= -->
+    <aside class="col-side">
+      <section class="panel" aria-labelledby="markets-h">
+        <h2 id="markets-h">Markets</h2>
+        <label class="sr-only" for="marketSearch">Search markets</label>
+        <input id="marketSearch" type="search" placeholder="Search markets…" autocomplete="off" />
+        <div id="marketList" class="market-list" role="listbox" aria-label="Available markets"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="watch-h">
+        <h2 id="watch-h">Watchlist</h2>
+        <p class="hint">Star markets to pin them here. Stored locally in your browser.</p>
+        <ul id="watchlist" class="watchlist"></ul>
+      </section>
+    </aside>
+
+    <!-- ======================= Center column ========================== -->
+    <section class="col-main">
+      <div class="panel chart-panel">
+        <div class="chart-head">
+          <div class="symbol-info">
+            <div class="symbol-row">
+              <h1 id="selSymbol">—</h1>
+              <span class="sim-inline">sample or live-labeled data</span>
+            </div>
+            <div class="price-line">
+              <span class="big-price" id="selPrice">—</span>
+              <span id="selChg" class="chg">—</span>
+            </div>
+            <div class="src-line" id="srcLine">loading data source…</div>
+          </div>
+          <div class="tf-tabs" id="tfTabs" role="tablist" aria-label="Timeframe"></div>
+        </div>
+        <div class="chart-wrap" id="chartWrap">
+          <canvas id="chart" aria-label="Price chart (candlesticks)"></canvas>
+          <div class="chart-tooltip" id="chartTooltip" hidden></div>
+        </div>
+      </div>
+
+      <div class="grid-two">
+        <!-- Portfolio -->
+        <section class="panel" aria-labelledby="pf-h">
+          <h2 id="pf-h">Portfolio <span class="tag tag-sim">simulated</span></h2>
+          <div class="kpis">
+            <div class="kpi"><span class="kpi-label">Cash</span><span class="kpi-value" id="pfCash">—</span></div>
+            <div class="kpi"><span class="kpi-label">Equity (mark)</span><span class="kpi-value" id="pfEquity">—</span></div>
+            <div class="kpi"><span class="kpi-label">Today P/L</span><span class="kpi-value" id="pfDayPnl">—</span></div>
+            <div class="kpi"><span class="kpi-label">Net P/L (all trades)</span><span class="kpi-value" id="pfNet">—</span></div>
+          </div>
+          <div class="limit-line">
+            <div class="limit-head">
+              <span>Daily loss limit used</span><span id="pfLimitTxt">—</span>
+            </div>
+            <div class="meter"><div class="meter-fill" id="pfLimitBar"></div></div>
+          </div>
+          <ul class="mini-stats">
+            <li>Start balance: <strong id="pfStart">—</strong> (fake)</li>
+            <li>Fees paid: <strong id="pfFees">—</strong></li>
+            <li>Slippage cost: <strong id="pfSlip">—</strong></li>
+          </ul>
+
+          <h3 class="sub-h">Open positions <span id="posCount" class="count-chip">0</span></h3>
+          <div class="table-scroll">
+            <table class="tbl" id="positionsTable">
+              <thead>
+                <tr><th>Market</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>SL</th><th>TP</th><th>Unreal. P/L</th><th></th></tr>
+              </thead>
+              <tbody id="positionsBody">
+                <tr class="empty-row"><td colspan="9">No open positions.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Bot controls -->
+        <section class="panel" aria-labelledby="bot-h">
+          <h2 id="bot-h">Bot controls <span class="tag tag-sim">paper only — cannot place real orders</span></h2>
+          <div class="bot-status-row">
+            <span class="bot-status-pill" id="botStatus" data-status="IDLE">IDLE</span>
+            <span class="bot-target" id="botTarget">no target set</span>
+          </div>
+          <p class="hint" id="botHint">Start runs the example strategy against the market &amp; timeframe selected on the chart. Signals are evaluated once per closed candle.</p>
+
+          <div class="btn-row">
+            <button id="btnStart" class="btn btn-primary" type="button">▶ Start</button>
+            <button id="btnPause" class="btn" type="button" disabled>⏸ Pause</button>
+            <button id="btnResume" class="btn" type="button" disabled>⏵ Resume</button>
+            <button id="btnStop" class="btn" type="button" disabled>⏹ Stop</button>
+            <button id="btnReset" class="btn btn-ghost" type="button">↺ Reset sim</button>
+            <button id="btnKill" class="btn btn-danger" type="button" title="Emergency stop: force-close all simulated positions and halt">🛑 Emergency stop</button>
+          </div>
+          <p class="risk-block" id="riskBlock" hidden></p>
+
+          <h3 class="sub-h">Risk &amp; sizing</h3>
+          <div class="cfg-grid" id="cfgRisk">
+            <label>Position size (% equity)<input type="number" data-cfg="positionSizePct" min="0.5" max="100" step="0.5" /></label>
+            <label>Max open positions<input type="number" data-cfg="maxOpenPositions" min="1" max="20" step="1" /></label>
+            <label>Daily loss limit (% day-start equity, 0 = off)<input type="number" data-cfg="dailyLossLimitPct" min="0" max="50" step="0.5" /></label>
+            <label>Cooldown after a loss (seconds)<input type="number" data-cfg="cooldownSec" min="0" max="3600" step="10" /></label>
+            <label>Fee estimate (bps / side)<input type="number" data-cfg="feeBps" min="0" max="200" step="1" /></label>
+            <label>Slippage estimate (bps / fill)<input type="number" data-cfg="slippageBps" min="0" max="200" step="1" /></label>
+          </div>
+
+          <h3 class="sub-h">Strategy parameters <span class="tag tag-hyp">example — not a profit claim</span></h3>
+          <div class="cfg-grid" id="cfgStrategy">
+            <label>Fast EMA<input type="number" data-cfg="fastEma" min="2" max="200" step="1" /></label>
+            <label>Slow EMA<input type="number" data-cfg="slowEma" min="3" max="400" step="1" /></label>
+            <label>RSI period<input type="number" data-cfg="rsiPeriod" min="2" max="100" step="1" /></label>
+            <label>RSI overbought<input type="number" data-cfg="rsiOverbought" min="55" max="95" step="1" /></label>
+            <label>ATR period<input type="number" data-cfg="atrPeriod" min="2" max="100" step="1" /></label>
+            <label>SL × ATR<input type="number" data-cfg="atrMultSL" min="0.2" max="10" step="0.1" /></label>
+            <label>TP × ATR<input type="number" data-cfg="atrMultTP" min="0.2" max="20" step="0.1" /></label>
+            <label class="chk">Allow short positions<input type="checkbox" data-cfg="allowShorts" /></label>
+          </div>
+          <p class="cfg-feedback" id="cfgFeedback" role="status"></p>
+        </section>
+      </div>
+
+      <!-- Trade history -->
+      <section class="panel" aria-labelledby="hist-h">
+        <h2 id="hist-h">Trade history <span class="tag tag-sim">simulated fills incl. estimated fees &amp; slippage</span></h2>
+        <div class="table-scroll">
+          <table class="tbl" id="historyTable">
+            <thead>
+              <tr>
+                <th>Closed</th><th>Market</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th>
+                <th>Gross P/L</th><th>Fees</th><th>Slippage</th><th>Net P/L</th><th>Exit reason</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody">
+              <tr class="empty-row"><td colspan="11">No simulated trades yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ======================= Analysis column ======================== -->
+    <aside class="col-analysis">
+      <section class="panel" aria-labelledby="an-h">
+        <h2 id="an-h">Analysis &amp; signal</h2>
+        <div id="analysisBody" class="analysis-body">
+          <p class="hint">Loading analysis…</p>
+        </div>
+        <p class="tiny-note">Signals are informational only and produced by a simple example strategy. This is not financial advice.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="bt-h">
+        <h2 id="bt-h">Backtest <span class="tag tag-hyp">hypothetical</span></h2>
+        <p class="hint">Runs the same rules over recent closed candles of the selected market/timeframe. Uses labelled data with estimated fees &amp; slippage. <strong>Hypothetical results — not predictive of future returns.</strong></p>
+        <div class="btn-row">
+          <button id="btnBacktest" class="btn" type="button">Run backtest (~500 bars)</button>
+        </div>
+        <div id="backtestBody" class="backtest-body"><p class="hint">No backtest run yet.</p></div>
+        <canvas id="btEquity" height="90" class="bt-equity" hidden aria-label="Backtest equity curve"></canvas>
+      </section>
+    </aside>
+  </main>
+
+  <!-- ========================= Activity log =========================== -->
+  <section class="logbar" id="logbar" aria-label="Activity log">
+    <button class="logbar-toggle" id="logToggle" type="button" aria-expanded="false" aria-controls="logPanelWrap">
+      ▲ Activity log <span id="logCount" class="count-chip">0</span>
+    </button>
+    <div class="logbar-panel" id="logPanelWrap" hidden>
+      <div class="log-filters" id="logFilters">
+        <button class="chip active" data-type="">All</button>
+        <button class="chip" data-type="SIGNAL">Signals</button>
+        <button class="chip" data-type="ORDER">Orders</button>
+        <button class="chip" data-type="RISK">Risk</button>
+        <button class="chip" data-type="SYSTEM">System</button>
+        <button class="chip" data-type="ERROR">Errors</button>
+      </div>
+      <div class="table-scroll log-scroll">
+        <table class="tbl tbl-log">
+          <thead><tr><th style="width:9.5em">Time (UTC)</th><th style="width:6em">Type</th><th>Event</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p><strong>Candlebench</strong> is an educational paper-trading simulator. Market data is either clearly-labelled deterministic
+    sample data or read-only public exchange data. Signals are informational only; simulated and backtested results are
+    hypothetical, include simplified fee/slippage estimates, and <strong>do not predict future returns</strong>.
+    This application does not provide financial advice and cannot place real-money orders.</p>
+  </footer>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="offline" id="offlineBanner" hidden>Connection to the Candlebench server lost — retrying…</div>
+
+  <noscript><div class="noscript">Candlebench needs JavaScript to render the dashboard.</div></noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
