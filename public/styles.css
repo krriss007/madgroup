@@ -169,7 +169,17 @@ body {
 .src-line { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .src-line.warn { color: var(--warn); }
 
-.tf-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tf-tabs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.chart-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.live-toggle {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700;
+  color: var(--muted); cursor: pointer; user-select: none;
+}
+.live-toggle input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+.live-toggle input:checked + span { color: var(--up); }
+.live-status { font-size: 11px; color: var(--muted); min-height: 13px; text-align: right; }
+.live-status.on { color: var(--up); }
+.live-status.err { color: var(--warn); }
 .tf-tab {
   padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-soft);
   color: var(--muted); font-size: 12.5px; font-weight: 700; cursor: pointer;

@@ -3,6 +3,7 @@
 // No secrets, keys, or credentials exist in this file or anywhere client-side.
 // ---------------------------------------------------------------------------
 import { createChart, fmt } from './chart.js';
+import { collectLive } from './liveFeed.js';
 
 const $ = (id) => document.getElementById(id);
 const S = {
@@ -14,6 +15,7 @@ const S = {
   state: null,
   logs: { items: [], after: 0, filter: '' },
   lastLogTs: 0,
+  live: { enabled: true, inflight: false, provider: null, error: null, lastIngest: 0 },
 };
 
 // ------------------------------------------------------------------ api ----
@@ -79,7 +81,10 @@ async function boot() {
     if (saved.watch?.length) S.watch = saved.watch;
     if (saved.sel && S.meta.markets.some((m) => m.symbol === saved.sel.symbol)) S.sel.symbol = saved.sel.symbol;
     if (saved.sel?.tf && S.meta.timeframes.some((t) => t.id === saved.sel.tf)) S.sel.tf = saved.sel.tf;
+    S.live.enabled = JSON.parse(localStorage.getItem('cb.live') ?? 'true') !== false;
   } catch { /* fresh start */ }
+  $('liveToggle').checked = S.live.enabled;
+  renderLiveStatus();
 
   renderTfTabs();
   renderMarketList();
@@ -104,6 +109,7 @@ async function refreshAll() {
 
 async function loopCandles() {
   if (!S.meta) return;
+  kickCollector();
   try {
     const [cd, an] = await Promise.all([
       GET(`/api/candles?symbol=${encodeURIComponent(S.sel.symbol)}&tf=${S.sel.tf}&limit=300`),
@@ -112,13 +118,61 @@ async function loopCandles() {
     S.candles = cd.candles;
     S.analysis = an;
     $('offlineBanner').hidden = true;
-    renderDataBadge(cd.isSample, cd.label);
+    renderDataBadge(cd.source, cd.provider, cd.label);
     renderChartHead(cd);
     renderChart();
     renderAnalysis(an);
   } catch (e) {
     $('offlineBanner').hidden = false;
     console.warn('candles refresh failed:', e.message);
+  }
+}
+
+// ---- client-direct live feed -----------------------------------------------
+// The browser fetches public exchange candles and relays them to the server.
+// Non-blocking; single flight; pauses when the tab is hidden or toggled off.
+function kickCollector() {
+  if (!S.live.enabled || S.live.inflight || document.visibilityState !== 'visible') return;
+  S.live.inflight = true;
+  const { symbol, tf } = S.sel;
+  collectLive(symbol, tf)
+    .then(async (res) => {
+      if (!res) {
+        S.live.error = 'no public provider reachable from your browser';
+        renderLiveStatus();
+        return;
+      }
+      S.live.provider = res.provider;
+      S.live.error = null;
+      await POST('/api/market/ingest', { symbol, tf, provider: res.provider, candles: res.candles });
+      S.live.lastIngest = Date.now();
+      renderLiveStatus();
+    })
+    .catch((e) => {
+      S.live.error = e.message;
+      renderLiveStatus();
+    })
+    .finally(() => { S.live.inflight = false; });
+}
+
+function renderLiveStatus() {
+  const el = $('liveStatus');
+  if (!el) return;
+  if (!S.live.enabled) {
+    el.textContent = 'off — server data only';
+    el.className = 'live-status';
+    return;
+  }
+  const fresh = Date.now() - S.live.lastIngest < 30_000;
+  if (S.live.provider && fresh && !S.live.error) {
+    el.textContent = `${S.live.provider} · feeding live prices`;
+    el.className = 'live-status on';
+  } else if (S.live.error) {
+    el.textContent = `unavailable — ${S.live.error}`;
+    el.className = 'live-status err';
+  } else {
+    el.textContent = S.live.provider ? `${S.live.provider} · reconnecting…` : 'connecting to a public provider…';
+    el.className = 'live-status';
   }
 }
 
@@ -231,6 +285,7 @@ function renderChart() {
     levels: openPos ? { entry: openPos.entryPrice, stopLoss: openPos.stopLoss, takeProfit: openPos.takeProfit } : null,
     signals,
     isSample: S.analysis ? S.analysis.isSample : true,
+    provider: S.analysis?.provider || null,
   });
 }
 
@@ -251,11 +306,19 @@ function renderChartHead(cd) {
   src.className = `src-line ${cd.isSample ? 'warn' : ''}`;
 }
 
-function renderDataBadge(isSample, label) {
+function renderDataBadge(source, provider, label) {
   const b = $('dataBadge');
-  b.dataset.mode = isSample ? 'sample' : 'okx';
-  b.textContent = isSample ? 'DATA: SAMPLE (simulated)' : 'DATA: OKX PUBLIC (live, read-only)';
-  b.title = label;
+  if (source === 'client') {
+    b.dataset.mode = 'live';
+    b.textContent = `DATA: LIVE — ${provider} (via browser)`;
+  } else if (source === 'okx') {
+    b.dataset.mode = 'live';
+    b.textContent = 'DATA: LIVE — OKX public (server-side)';
+  } else {
+    b.dataset.mode = 'sample';
+    b.textContent = 'DATA: SAMPLE (simulated)';
+  }
+  b.title = label || '';
 }
 
 function renderTfTabs() {
@@ -294,6 +357,10 @@ function renderAnalysis(an) {
       <span class="k">Last closed candle</span><span class="v">${utc(ev.symbolTime).slice(0, 16)}</span>
     </div>`;
 
+  const chipLabel = an.source === 'client'
+    ? `LIVE — ${an.provider || 'browser feed'}`
+    : an.isSample ? 'SAMPLE DATA' : 'LIVE — OKX (server)';
+
   const lv = ev.levels;
   const levelsHtml = lv ? `
     <div class="levels">
@@ -307,7 +374,7 @@ function renderAnalysis(an) {
   body.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
       <span class="signal-badge ${cls}">${actionLabel}</span>
-      <span class="src-chip ${an.isSample ? 'sample' : 'okx'}">${an.isSample ? 'SAMPLE DATA' : 'OKX PUBLIC DATA'}</span>
+      <span class="src-chip ${an.isSample ? 'sample' : 'okx'}">${esc(chipLabel)}</span>
     </div>
     ${levelsHtml}
     <ul class="rules">${rules}</ul>
@@ -630,6 +697,18 @@ function bindEvents() {
     S.logs.items = [];
     S.logs.after = 0;
     loopLogs();
+  });
+
+  $('liveToggle').addEventListener('change', (e) => {
+    S.live.enabled = e.target.checked;
+    localStorage.setItem('cb.live', JSON.stringify(S.live.enabled));
+    if (!S.live.enabled) S.live.error = null;
+    renderLiveStatus();
+    if (S.live.enabled) kickCollector();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') kickCollector();
   });
 
   window.addEventListener('resize', () => renderChart());

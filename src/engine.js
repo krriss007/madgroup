@@ -253,7 +253,7 @@ export class PaperEngine {
     const { symbol, tf } = st.bot.target;
     const ms = tfMs(tf);
 
-    const { candles, source, isSample } = await this.bus.candles(symbol, tf, 400);
+    const { candles, source } = await this.bus.candles(symbol, tf, 400);
     if (candles.length < Math.max(this.config.slowEma, this.config.rsiPeriod, this.config.atrPeriod) + 5) {
       return; // not enough history yet
     }

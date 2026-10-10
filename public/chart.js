@@ -130,7 +130,10 @@ export function createChart(canvas, tooltipEl) {
     ctx.globalAlpha = 0.16;
     ctx.fillStyle = data.isSample ? '#f59e0b' : '#2dd4bf';
     ctx.font = '800 20px system-ui, sans-serif';
-    ctx.fillText(data.isSample ? 'SAMPLE DATA — SIMULATED PRICES' : 'OKX PUBLIC DATA — READ-ONLY', x0 + 14, y0 + 26);
+    const watermark = data.isSample
+      ? 'SAMPLE DATA — SIMULATED PRICES'
+      : `LIVE — ${String(data.provider || 'PUBLIC EXCHANGE').toUpperCase()} DATA (VIA BROWSER)`;
+    ctx.fillText(watermark, x0 + 14, y0 + 26);
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.fillText('Paper trading only — not investment advice', x0 + 14, y0 + 44);
     ctx.restore();

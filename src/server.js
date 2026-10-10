@@ -25,7 +25,7 @@ const engine = new PaperEngine(bus, store);
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '50kb' }));
+app.use(express.json({ limit: '300kb' }));
 
 // Minimal security headers; API responses must never be cached.
 app.use((req, res, next) => {
@@ -89,8 +89,8 @@ api.get('/candles', async (req, res, next) => {
     const symbol = validSymbol(req, res); if (!symbol) return;
     const tf = validTf(req, res); if (!tf) return;
     const limit = intParam(req, 'limit', 300, 50, 1000);
-    const { candles, source, isSample, label } = await bus.candles(symbol, tf, limit);
-    res.json({ symbol, tf, source, isSample, label, candles });
+    const { candles, source, isSample, label, provider } = await bus.candles(symbol, tf, limit);
+    res.json({ symbol, tf, source, isSample, label, provider, candles });
   } catch (err) { next(err); }
 });
 
@@ -98,7 +98,7 @@ api.get('/analysis', async (req, res, next) => {
   try {
     const symbol = validSymbol(req, res); if (!symbol) return;
     const tf = validTf(req, res); if (!tf) return;
-    const { candles, source, isSample, label } = await bus.candles(symbol, tf, 400);
+    const { candles, source, isSample, label, provider } = await bus.candles(symbol, tf, 400);
     const closed = candles.filter((c) => c.complete);
     const cfg = engine.config;
     const warm = Math.max(cfg.slowEma, cfg.rsiPeriod, cfg.atrPeriod) + 5;
@@ -111,6 +111,7 @@ api.get('/analysis', async (req, res, next) => {
       source,
       isSample,
       label,
+      provider,
       lastUpdate: Date.now(),
       candleCount: candles.length,
       closedCount: closed.length,
@@ -179,6 +180,23 @@ api.post('/positions/close', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- client-direct live feed relay -----------------------------------------
+// The dashboard's browser collector fetches public CORS-enabled exchange
+// endpoints (no keys involved) and relays candles here. Everything is strictly
+// validated before the data bus will use it, and only while it stays fresh.
+api.post('/market/ingest', (req, res) => {
+  const { symbol, tf, provider, candles } = req.body || {};
+  if (!MARKETS.some((m) => m.symbol === symbol)) return bad(res, 'Invalid symbol');
+  if (!TIMEFRAMES.some((t) => t.id === tf)) return bad(res, 'Invalid timeframe');
+  const result = bus.clientFeed.ingest(symbol, tf, tfMs(tf), candles, provider);
+  if (result.error) return bad(res, `Rejected feed: ${result.error}`);
+  res.json({ ok: true, bars: result.bars, note: 'Feed accepted. Used only while the dashboard keeps it fresh.' });
+});
+
+api.get('/market/feed-status', (req, res) => {
+  res.json({ feeds: bus.clientFeed.status(), mode: bus.mode });
+});
+
 // ---- state, logs, backtest --------------------------------------------------
 api.get('/state', async (req, res, next) => {
   try {
@@ -199,10 +217,10 @@ api.post('/backtest', async (req, res, next) => {
     if (!MARKETS.some((m) => m.symbol === symbol)) return bad(res, 'Invalid symbol');
     if (!TIMEFRAMES.some((t) => t.id === tf)) return bad(res, 'Invalid timeframe');
     const want = Math.min(Math.max(Number(bars) || 500, 100), 1000);
-    const { candles, source, isSample, label } = await bus.candles(symbol, tf, want);
+    const { candles, source, isSample, label, provider } = await bus.candles(symbol, tf, want);
     const closed = candles.filter((c) => c.complete);
     const result = runBacktest({ candles: closed, config: engine.config });
-    res.json({ symbol, tf, source, isSample, label, requestedBars: want, ...result });
+    res.json({ symbol, tf, source, isSample, label, provider, requestedBars: want, ...result });
   } catch (err) { next(err); }
 });
 

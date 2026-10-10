@@ -76,7 +76,14 @@
             </div>
             <div class="src-line" id="srcLine">loading data source…</div>
           </div>
-          <div class="tf-tabs" id="tfTabs" role="tablist" aria-label="Timeframe"></div>
+          <div class="chart-controls">
+            <label class="live-toggle" for="liveToggle" title="Fetch public market data directly from exchanges via your browser (no keys involved) and relay it to the paper engine. Turn off to use server-side data only.">
+              <input type="checkbox" id="liveToggle" />
+              <span>live feed via browser</span>
+            </label>
+            <span class="live-status" id="liveStatus"></span>
+            <div class="tf-tabs" id="tfTabs" role="tablist" aria-label="Timeframe"></div>
+          </div>
         </div>
         <div class="chart-wrap" id="chartWrap">
           <canvas id="chart" aria-label="Price chart (candlesticks)"></canvas>
