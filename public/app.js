@@ -130,29 +130,40 @@ async function loopCandles() {
 
 // ---- client-direct live feed -----------------------------------------------
 // The browser fetches public exchange candles and relays them to the server.
-// Non-blocking; single flight; pauses when the tab is hidden or toggled off.
+// Feeds BOTH the chart selection and the bot's target (if different) so the
+// paper engine can run on live prices too. Non-blocking, single flight,
+// pauses when the tab is hidden or the toggle is off.
 function kickCollector() {
   if (!S.live.enabled || S.live.inflight || document.visibilityState !== 'visible') return;
   S.live.inflight = true;
-  const { symbol, tf } = S.sel;
-  collectLive(symbol, tf)
-    .then(async (res) => {
-      if (!res) {
-        S.live.error = 'no public provider reachable from your browser';
-        renderLiveStatus();
-        return;
-      }
-      S.live.provider = res.provider;
-      S.live.error = null;
-      await POST('/api/market/ingest', { symbol, tf, provider: res.provider, candles: res.candles });
+  runCollector().finally(() => { S.live.inflight = false; });
+}
+
+async function runCollector() {
+  const jobs = [{ symbol: S.sel.symbol, tf: S.sel.tf }];
+  const t = S.state?.bot?.target;
+  if (
+    t && (t.symbol !== S.sel.symbol || t.tf !== S.sel.tf) &&
+    S.meta.markets.some((m) => m.symbol === t.symbol) &&
+    S.meta.timeframes.some((x) => x.id === t.tf)
+  ) jobs.push({ symbol: t.symbol, tf: t.tf });
+
+  let provider = null;
+  let err = null;
+  for (const job of jobs) {
+    try {
+      const res = await collectLive(job.symbol, job.tf);
+      if (!res) { err = 'no public provider reachable from your browser'; continue; }
+      provider = res.provider;
+      await POST('/api/market/ingest', { symbol: job.symbol, tf: job.tf, provider: res.provider, candles: res.candles });
       S.live.lastIngest = Date.now();
-      renderLiveStatus();
-    })
-    .catch((e) => {
-      S.live.error = e.message;
-      renderLiveStatus();
-    })
-    .finally(() => { S.live.inflight = false; });
+    } catch (e) {
+      err = e.message;
+    }
+  }
+  if (provider) S.live.provider = provider;
+  S.live.error = err;
+  renderLiveStatus();
 }
 
 function renderLiveStatus() {
