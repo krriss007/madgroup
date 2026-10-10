@@ -321,7 +321,7 @@ function renderDataBadge(source, provider, label) {
   const b = $('dataBadge');
   if (source === 'client') {
     b.dataset.mode = 'live';
-    b.textContent = `DATA: LIVE — ${provider} (via browser)`;
+    b.textContent = `DATA: LIVE — ${provider} (client feed)`;
   } else if (source === 'okx') {
     b.dataset.mode = 'live';
     b.textContent = 'DATA: LIVE — OKX public (server-side)';

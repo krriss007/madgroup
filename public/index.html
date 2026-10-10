@@ -77,9 +77,9 @@
             <div class="src-line" id="srcLine">loading data source…</div>
           </div>
           <div class="chart-controls">
-            <label class="live-toggle" for="liveToggle" title="Fetch public market data directly from exchanges via your browser (no keys involved) and relay it to the paper engine. Turn off to use server-side data only.">
+            <label class="live-toggle" for="liveToggle" title="Collect live public market data: your browser fetches public exchange candles, and/or the MT4 Expert Advisor (mt4/) pushes broker candles. Read-only, no keys. The server uses whichever feeds are fresh.">
               <input type="checkbox" id="liveToggle" />
-              <span>live feed via browser</span>
+              <span>live feed (browser / MT4)</span>
             </label>
             <span class="live-status" id="liveStatus"></span>
             <div class="tf-tabs" id="tfTabs" role="tablist" aria-label="Timeframe"></div>

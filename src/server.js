@@ -14,8 +14,9 @@ import { serverConfig, configLimits } from './config.js';
 import { DataBus, TIMEFRAMES, MARKETS, tfMs } from './data/databus.js';
 import { PaperEngine } from './engine.js';
 import { runBacktest } from './backtest.js';
-import { getEvents, logSystem, logError } from './logger.js';
+import { getEvents, logSystem, logError, logRisk } from './logger.js';
 import { evaluateStrategy } from './strategy.js';
+import { alignRowsToLastBar } from './data/clientFeed.js';
 import { StateStore } from './store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -181,16 +182,53 @@ api.post('/positions/close', async (req, res, next) => {
 });
 
 // ---- client-direct live feed relay -----------------------------------------
-// The dashboard's browser collector fetches public CORS-enabled exchange
-// endpoints (no keys involved) and relays candles here. Everything is strictly
-// validated before the data bus will use it, and only while it stays fresh.
-api.post('/market/ingest', (req, res) => {
-  const { symbol, tf, provider, candles } = req.body || {};
-  if (!MARKETS.some((m) => m.symbol === symbol)) return bad(res, 'Invalid symbol');
+// Feeders: the dashboard's browser collector and the MT4 Expert Advisor
+// (mt4/CandlebenchFeed.mq4). Both push public, read-only candle data; the
+// server validates everything strictly and uses a feed only while it stays
+// fresh. Rate-limited because this endpoint is internet-exposed.
+const ingestHits = new Map(); // ip -> [timestamps within window]
+function rateLimitIngest(req, res, next) {
+  const winMs = 10_000;
+  const maxPerWindow = 30;
+  const ip = String(req.socket?.remoteAddress || 'unknown');
+  const nowMs = Date.now();
+  const arr = (ingestHits.get(ip) || []).filter((t) => nowMs - t < winMs);
+  if (arr.length >= maxPerWindow) {
+    // Deliberately do not log raw IPs (privacy).
+    logRisk('Ingest rate limit reached', { limit: maxPerWindow, windowMs: winMs });
+    return bad(res, `Too many feed updates - max ${maxPerWindow} per ${winMs / 1000}s.`, 429);
+  }
+  arr.push(nowMs);
+  ingestHits.set(ip, arr);
+  if (ingestHits.size > 5000) ingestHits.clear(); // crude memory bound
+  next();
+}
+
+api.post('/market/ingest', rateLimitIngest, (req, res) => {
+  const { symbol, tf, provider, candles, align } = req.body || {};
+  if (!MARKETS.some((m) => m.symbol === symbol)) {
+    return bad(res, `Unknown market "${symbol}". See GET /api/meta for the supported list.`);
+  }
   if (!TIMEFRAMES.some((t) => t.id === tf)) return bad(res, 'Invalid timeframe');
-  const result = bus.clientFeed.ingest(symbol, tf, tfMs(tf), candles, provider);
+
+  let rows = candles;
+  let alignedSec = null;
+  if (align === 'lastBar') {
+    // MT4 feeds: broker bar times are anchored to the broker clock, not UTC.
+    const a = alignRowsToLastBar(rows, tfMs(tf));
+    if (a.error) return bad(res, `Rejected feed: ${a.error}`);
+    rows = a.rows;
+    alignedSec = a.offsetSec;
+  }
+
+  const result = bus.clientFeed.ingest(symbol, tf, tfMs(tf), rows, provider);
   if (result.error) return bad(res, `Rejected feed: ${result.error}`);
-  res.json({ ok: true, bars: result.bars, note: 'Feed accepted. Used only while the dashboard keeps it fresh.' });
+  res.json({
+    ok: true,
+    bars: result.bars,
+    timeAlignedSec: alignedSec,
+    note: 'Feed accepted. Used only while this feeder keeps it fresh.',
+  });
 });
 
 api.get('/market/feed-status', (req, res) => {

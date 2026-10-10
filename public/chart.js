@@ -132,7 +132,7 @@ export function createChart(canvas, tooltipEl) {
     ctx.font = '800 20px system-ui, sans-serif';
     const watermark = data.isSample
       ? 'SAMPLE DATA — SIMULATED PRICES'
-      : `LIVE — ${String(data.provider || 'PUBLIC EXCHANGE').toUpperCase()} DATA (VIA BROWSER)`;
+      : `LIVE — ${String(data.provider || 'CLIENT FEED').toUpperCase()} DATA (LIVE FEED)`;
     ctx.fillText(watermark, x0 + 14, y0 + 26);
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.fillText('Paper trading only — not investment advice', x0 + 14, y0 + 44);
