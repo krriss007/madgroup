@@ -271,7 +271,7 @@ export class PaperEngine {
     logSignal(`${evaluation.action} signal on ${symbol} @ ${tf}`, {
       symbol, tf, action: evaluation.action, candleTime: lastClosed.t,
       price: evaluation.price, crossover: evaluation.crossover,
-      indicators: evaluation.indicators, data: isSample ? 'SAMPLE' : 'OKX-PUBLIC',
+      indicators: evaluation.indicators, data: String(source).toUpperCase(),
     });
 
     if (evaluation.action === 'BUY') await this.tryEnter(symbol, tf, evaluation, source);
@@ -358,7 +358,7 @@ export class PaperEngine {
     if (idx === -1) return;
     st.positions.splice(idx, 1);
 
-    const { price: mark, isSample } = await this.bus.lastPrice(pos.symbol, pos.tf);
+    const { price: mark, source: exitSource } = await this.bus.lastPrice(pos.symbol, pos.tf);
     const exitIdeal = mark ?? pos.entryPrice;
     const fill = round8(exitIdeal * (1 - this.config.slippageBps / BPS));
     const exitNotional = pos.qty * fill;
@@ -398,7 +398,7 @@ export class PaperEngine {
       id: trade.id, symbol: pos.symbol, tf: pos.tf, side: pos.side, qty: pos.qty,
       exitPrice: fill, idealPrice: exitIdeal, grossPnl: trade.grossPnl,
       fees, slippageCost, netPnl: net, exitReason: reason,
-      data: isSample ? 'SAMPLE' : 'OKX-PUBLIC',
+      data: String(exitSource).toUpperCase(),
       ...(reason === 'SIGNAL' && evaluation ? { signalPrice: evaluation.price } : {}),
     });
     this.persist();
