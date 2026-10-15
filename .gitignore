@@ -1,8 +1,9 @@
 # Dependencies
 node_modules/
 
-# Runtime state (simulated portfolio snapshots) - never commit
-data/
+# Runtime state (simulated portfolio snapshots) - never commit.
+# Anchored to the repo root so src/data/ (source code!) stays tracked.
+/data/
 
 # Secrets - never commit
 .env
